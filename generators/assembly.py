@@ -10,6 +10,7 @@ usage: python assembly.py USER OUT_DIR [--cache file.json]  ->  OUT_DIR/assembly
 """
 import argparse
 import os
+import re
 
 from arm import gripper_arm
 from circuit import (MONTHS, ROBOT_COLORS, build_route, cumulative, d_attr,
@@ -53,6 +54,53 @@ PACKET_SVG = ('<circle r="8" fill="#22d3ee" opacity="0.3" filter="url(#bigglow)"
               '<rect x="-4" y="-4" width="8" height="8" rx="1.5" fill="#ecfeff" stroke="#22d3ee" stroke-width="1.3" transform="rotate(45)"/>')
 
 
+def gestures(home, up, left, right, peek):
+    """Idle moves for an arm, each a list of (seconds, grip target, gripper closed)."""
+    hx, hy = home
+    return {
+        "rest": [(1.1, home, False)],
+        "wave": [(0.6, up, False), (0.28, left, True), (0.28, right, False), (0.28, left, True),
+                 (0.28, right, False), (0.5, home, False)],
+        "peek": [(0.8, peek, False), (1.3, peek, False), (0.22, peek, True), (0.22, peek, False), (0.8, home, False)],
+        "bob": [(0.25, (hx, hy + 8), False), (0.25, (hx, hy - 4), False)] * 3 + [(0.25, home, False)],
+        "clap": [(0.17, home, True), (0.17, home, False), (0.17, home, True), (0.17, home, False)],
+    }
+
+
+def idle(keys, start, end, moves, order):
+    """Fill [start, end] with gestures from `order` (cycled); returns the wave windows."""
+    t, waves, i = start, [], 0
+    while True:
+        seq = moves[order[i % len(order)]]
+        total = sum(dt for dt, _, _ in seq)
+        if t + total > end:
+            break
+        if order[i % len(order)] == "wave":
+            waves.append((t + 0.5, t + total - 0.4))
+        for dt, tgt, closed in seq:
+            t += dt
+            keys.append((t, tgt, closed))
+        i += 1
+    keys.append((end, moves["rest"][0][1], False))
+    return waves
+
+
+def bubble(x, y, windows, D, dur):
+    """Small 'hi!' speech bubble shown while an arm waves."""
+    if not windows:
+        return ""
+    vals, times = ["0"], [0.0]
+    for w0, w1 in windows:
+        vals += ["1", "0"]
+        times += [w0, w1]
+    return (f'<g transform="translate({x},{y})" opacity="0">'
+            f'<rect x="-19" y="-11" width="38" height="20" rx="7" fill="{BP["bg"]}" stroke="#22d3ee" stroke-width="1.3"/>'
+            f'<path d="M-8 9 L-13 17 L-2 9" fill="{BP["bg"]}" stroke="#22d3ee" stroke-width="1.3" stroke-linejoin="round"/>'
+            f'<rect x="-9" y="7" width="8" height="3" fill="{BP["bg"]}"/>'
+            f'<text x="0" y="3.5" text-anchor="middle" class="t" font-size="11" font-weight="700" fill="{BP["ink"]}">hi!</text>'
+            f'<animate attributeName="opacity" values="{";".join(vals)}" keyTimes="{kt(times, D)}" calcMode="discrete" {dur}/></g>')
+
+
 def finale(d, pts, stops, t_b0, t_b1, D, dur, tx0, ty0, tw):
     """Packet flies from the bin into the title block, the board answers with a wave."""
     o = []
@@ -92,7 +140,11 @@ def finale(d, pts, stops, t_b0, t_b1, D, dur, tx0, ty0, tw):
     return "\n".join(o)
 
 
-def render(d):
+TIMING = {}
+EXIT_X = (10, 890)                  # where power leaves the bottom edge when exits are on
+
+
+def render(d, exits=False, start_near_deploy=False):
     weeks = d["weeks"]
     center = lambda w, day: (GX0 + w * STEP + CELL / 2, GY0 + day * STEP + CELL / 2)
     cpu_x, cpu_y, cpu_w, cpu_h = CPU
@@ -109,6 +161,9 @@ def render(d):
     t_dep = t_cpu + 2.4                                 # packet lands in the bin
     t_b0, t_b1 = t_dep + 0.15, t_dep + 1.0              # packet launches back to the title block
     D = t_b1 + 2.2
+    # optionally open mid-cycle so the first deploy lands a few seconds after page load
+    phase = (t_cpu - 2.0) if start_near_deploy else 0.0
+    TIMING.update(t_b1=t_b1, D=D, phase=phase, first_hit=t_b1 - phase)
     dur = f'dur="{D:.2f}s" repeatCount="indefinite"'
     rf = lambda s: (t_power + s / L * M) / D            # route distance -> loop fraction
 
@@ -117,13 +172,28 @@ def render(d):
         (0.0, (150, 96), False), (0.5, (FEEDER[0], FEEDER[1] - 40), False), (1.0, FEEDER, False),
         (1.25, FEEDER, True), (1.7, (FEEDER[0], FEEDER[1] - 40), True), (2.6, (SOCKET[0], SOCKET[1] - 44), True),
         (3.1, SOCKET, True), (3.35, SOCKET, False), (3.8, (SOCKET[0], SOCKET[1] - 44), False),
-        (4.6, (150, 96), False), (D, (150, 96), False)]
-    deploy_keys = [
-        (0.0, (752, 96), False), (t_cpu - 1.3, (752, 96), False), (t_cpu - 0.2, (OUT_PAD[0], OUT_PAD[1] - 36), False),
+        (4.6, (150, 96), False)]
+    lmoves = gestures((150, 96), (150, 58), (132, 60), (168, 60), (205, 150))
+    loader_waves = idle(loader_keys, 4.6, t_b1 - 0.3, lmoves, ["rest", "wave", "rest", "peek", "rest", "bob", "rest", "clap"])
+    # celebrate overhead when the packet hits the name
+    for dt, closed in ((0.35, False), (0.2, True), (0.2, False), (0.2, True), (0.2, False)):
+        loader_keys.append((loader_keys[-1][0] + dt, (150, 58), closed))
+    loader_keys += [(loader_keys[-1][0] + 0.5, (150, 96), False), (D, (150, 96), False)]
+
+    dmoves = gestures((752, 96), (756, 58), (740, 60), (772, 60), (700, 150))
+    deploy_keys = [(0.0, (752, 96), False)]
+    deploy_waves = idle(deploy_keys, 0.3, t_cpu - 1.3, dmoves, ["rest", "peek", "rest", "wave", "bob", "rest", "clap", "rest"])
+    deploy_keys += [
+        (t_cpu - 0.2, (OUT_PAD[0], OUT_PAD[1] - 36), False),
         (t_cpu + 0.2, OUT_PAD, False), (t_cpu + 0.45, OUT_PAD, True), (t_cpu + 0.9, (OUT_PAD[0], OUT_PAD[1] - 40), True),
         (t_cpu + 1.8, (BIN[0], BIN[1] - 40), True), (t_cpu + 2.2, (BIN[0], BIN[1] - 6), True),
-        (t_cpu + 2.4, (BIN[0], BIN[1] - 6), False), (t_cpu + 2.9, (BIN[0], BIN[1] - 46), False),
-        (t_cpu + 3.7, (752, 96), False), (D, (752, 96), False)]
+        (t_cpu + 2.4, (BIN[0], BIN[1] - 6), False), (t_cpu + 2.9, (BIN[0], BIN[1] - 46), False)]
+    t = t_b1 + 0.45
+    deploy_keys.append((t, (756, 56), False))
+    for closed in (True, False, True, False):
+        t += 0.2
+        deploy_keys.append((t, (756, 56), closed))
+    deploy_keys += [(t + 0.5, (752, 96), False), (D, (752, 96), False)]
 
     o = []
     a = o.append
@@ -141,6 +211,16 @@ def render(d):
 </defs>''')
     a(f'<rect width="{W}" height="{H}" rx="12" fill="{BP["bg"]}"/><rect width="{W}" height="{H}" rx="12" fill="url(#bpgrid)"/>'
       f'<rect width="{W}" height="{H}" rx="12" fill="url(#bpmajor)"/>')
+    if exits:
+        # square bottom edge so the next board section continues seamlessly
+        a(f'<rect y="{H - 14}" width="{W}" height="14" fill="{BP["bg"]}"/><rect y="{H - 14}" width="{W}" height="14" fill="url(#bpgrid)"/>')
+        for path in (f"M262 96 H{EXIT_X[0]} V{H}", f"M638 96 H{EXIT_X[1]} V{H}"):
+            ln = 252 + (H - 96)
+            a(f'<path d="{path}" fill="none" stroke="{BP["soft"]}" stroke-opacity="0.35" stroke-width="2"/>'
+              f'<path d="{path}" fill="none" stroke="#22d3ee" stroke-width="2.4" filter="url(#glow)" '
+              f'stroke-dasharray="{ln} {ln + 6}" stroke-dashoffset="{ln}">'
+              f'<animate attributeName="stroke-dashoffset" values="{ln};{ln};0;0;{ln}" '
+              f'keyTimes="{kt([0, t_b1, t_b1 + 0.6, D - 0.3, D], D)}" {dur}/></path>')
 
     # ---- title block --------------------------------------------------
     tx0, ty0, tw = 262, 16, 376
@@ -271,9 +351,17 @@ def render(d):
                   carry=(1.25, 3.35), fill=BP["bg"], label="J1"))
     a(gripper_arm(db, DEPLOYER["l1"], DEPLOYER["l2"], DEPLOYER["grip"], deploy_keys, D, carried=PACKET_SVG,
                   carry=(t_cpu + 0.45, t_cpu + 2.4), fill=BP["bg"], label="J1"))
+    a(bubble(198, 34, loader_waves, D, dur))
+    a(bubble(704, 34, deploy_waves, D, dur))
     a(finale(d, pts, stops, t_b0, t_b1, D, dur, tx0, ty0, tw))
     a('</svg>')
-    return finalize("\n".join(o))
+    svg = finalize("\n".join(o))
+    if phase:
+        main = f'dur="{D:.2f}s"'
+        svg = re.sub(r"<(animate\w*|set)\b[^>]*>",
+                     lambda m: m.group(0) if main not in m.group(0) or " begin=" in m.group(0)
+                     else m.group(0).replace(main, f'{main} begin="-{phase:.2f}s"', 1), svg)
+    return svg
 
 
 def main():

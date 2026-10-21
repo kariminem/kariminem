@@ -19,16 +19,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Render assembly line
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python3 generators/assembly.py ${{ github.repository_owner }} dist
-
-      - name: Render repository categories
+      - name: Render profile board
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >
-          python3 generators/categories.py ${{ github.repository_owner }} dist
+          python3 generators/board.py ${{ github.repository_owner }} dist
+          --theme neon
+          --skills assets/skills.svg
           --readme README.md
           --base https://raw.githubusercontent.com/${{ github.repository }}/output
 
@@ -40,11 +37,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Commit README if categories changed
+      - name: Commit README if the board changed
         run: |
           if ! git diff --quiet README.md; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git commit -am "Update repository categories"
+            git commit -am "Update profile board"
             git push
           fi
