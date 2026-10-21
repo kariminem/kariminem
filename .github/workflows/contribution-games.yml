@@ -20,9 +20,6 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - name: Increase Node memory
-        run: echo "NODE_OPTIONS=--max-old-space-size=8192" >> $GITHUB_ENV
-
       # Writes dist/pacman-contribution-graph.svg and dist/pacman-contribution-graph-dark.svg
       - name: Generate Pac-Man graph
         uses: abozanona/pacman-contribution-graph@main
