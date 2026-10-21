@@ -225,7 +225,7 @@ def render(data, theme):
             a(f'<text x="{LEFT + w * STEP}" y="{TOP - 8}" class="silk" font-size="8" opacity="0.75">{MONTHS[mo - 1]}</text>')
         last = mo
     a(f'<text x="28" y="{H - 16}" class="silk" font-size="7.5" opacity="0.7">'
-      f'1 LED = 1 day · brightness = activity · robots R1–R{N_ROBOTS} relay the packet to the CPU</text>')
+      f'1 LED = 1 day · brightness = activity · robots R1-R{N_ROBOTS} relay the packet to the CPU</text>')
 
     # power header + CPU
     a(header_pins(start[0] - 4, start[1]))
