@@ -24,6 +24,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python3 generators/assembly.py ${{ github.repository_owner }} dist
 
+      - name: Render repository categories
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >
+          python3 generators/categories.py ${{ github.repository_owner }} dist
+          --readme README.md
+          --base https://raw.githubusercontent.com/${{ github.repository }}/output
+
       - name: Publish to output branch
         uses: crazy-max/ghaction-github-pages@v5
         with:
@@ -31,3 +39,12 @@ jobs:
           build_dir: dist
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Commit README if categories changed
+        run: |
+          if ! git diff --quiet README.md; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -am "Update repository categories"
+            git push
+          fi
