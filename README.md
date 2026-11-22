@@ -2,6 +2,7 @@
 <p align="center">
   <img src="https://raw.githubusercontent.com/kariminem/kariminem/output/hero.svg" width="100%" alt="Karim Taher">
   <img src="https://raw.githubusercontent.com/kariminem/kariminem/output/cat-robotics.svg" width="100%" alt="Robotics">
+  <a href="https://github.com/kariminem/elrobot-claude"><img src="https://raw.githubusercontent.com/kariminem/kariminem/output/repo-elrobot-claude.svg" width="100%" alt="elrobot-claude"></a>
   <a href="https://github.com/kariminem/python_rob"><img src="https://raw.githubusercontent.com/kariminem/kariminem/output/repo-python_rob.svg" width="100%" alt="python_rob"></a>
   <a href="https://github.com/kariminem/ROS"><img src="https://raw.githubusercontent.com/kariminem/kariminem/output/repo-ROS.svg" width="100%" alt="ROS"></a>
   <img src="https://raw.githubusercontent.com/kariminem/kariminem/output/cat-42.svg" width="100%" alt="42 Berlin">
